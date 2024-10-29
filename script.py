@@ -6,6 +6,11 @@ import numpy as np
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from sentence_transformers import SentenceTransformer
 
+from huggingface_hub import login
+
+huggingface_token = os.getenv("HUGGINGFACE_TOKEN")
+login(token=huggingface_token)
+
 # Step 1: Load the Llama model for text generation
 llama_model_path = 'meta-llama/Llama-3.2-1B'  # Replace with your model path
 tokenizer = AutoTokenizer.from_pretrained(llama_model_path)
