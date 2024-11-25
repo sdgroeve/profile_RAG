@@ -3,20 +3,32 @@ import sys
 import faiss
 import numpy as np
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import pipeline
 from sentence_transformers import SentenceTransformer
 import json
 import re
+import torch
 
 # Step 1: Load the Llama model for text generation and similarity assessment
-llama_model_path = 'meta-llama/Llama-3.2-3B'  # Replace with your model path
+llama_model_path = 'meta-llama/Llama-3.2-1B'  # Replace with your model path
 # Load tokenizer and model for both text generation and profile similarity checking
 print("Loading tokenizer and model for Llama...")
 tokenizer = AutoTokenizer.from_pretrained(llama_model_path)
 model = AutoModelForCausalLM.from_pretrained(llama_model_path)
+
+pipe = pipeline(
+    "text-generation", 
+    model=llama_model_path, 
+    max_length=500,
+    truncation=True,
+    torch_dtype=torch.bfloat16, 
+    device_map="auto"
+)
+
 print("Tokenizer and model loaded successfully.")
 
 # Step 2: Load and embed AI researcher profiles
-def load_profiles(profile_path='profiles.json'):
+def load_profiles(profile_path='researchers.json'):
     """
     Load researcher profiles from a JSON file.
     """
@@ -43,8 +55,13 @@ print("Embedding model loaded successfully.")
 # Create embeddings for the profiles
 print("Generating embeddings for profiles...")
 profile_texts = [
-    f"{p['name']}. Expertise: {p['expertise']}. {p['description']}" for p in profiles
+    f"Name: {p['name']}\nUnit: {p['research_unit']}\nBio: {p['bio']}\nKeywords: {p['keywords']}\nPublications: {' '.join(p['publications'])}" for p in profiles
 ]
+
+#tmp = "\n".join(profile_texts)
+#with open("ugent_ai_prompt.txt","w") as f:
+#    f.write(tmp)
+
 # Generate embeddings for each profile
 profile_embeddings = embedding_model.encode(profile_texts, convert_to_numpy=True)
 print("Embeddings generated successfully.")
@@ -86,7 +103,7 @@ def find_relevant_profiles(query, top_k=1):
     print(f"Initial search distances: {distances}")
 
     # If the closest match is not very similar, expand the search
-    if distances[0][0] > 1.0:  # Threshold for similarity, can be adjusted
+    if distances[0][0] > 10.0:  # Threshold for similarity, can be adjusted
         print("Query is vague, expanding search criteria...")
         # Expand the number of profiles to return if the initial match is not good enough
         top_k = min(len(profiles), top_k * 2)
@@ -97,67 +114,33 @@ def find_relevant_profiles(query, top_k=1):
     relevant_profiles = [profiles[idx] for idx in indices[0]]
     print(f"Found {len(relevant_profiles)} relevant profiles.")
 
-    # Step 6: Check similarity with AI agent
-    relevant_profiles = filter_similar_profiles_with_ai_agent(query, relevant_profiles)
-    
     return relevant_profiles
-
-# Function to filter similar profiles using the AI agent
-def filter_similar_profiles_with_ai_agent(query, relevant_profiles):
-    """
-    Use the AI agent to judge if the returned profiles are similar enough to the query.
-    """
-    print("Filtering similar profiles using AI agent...")
-    filtered_profiles = []
-
-    for profile in relevant_profiles:
-        # Build a text representation of the profile for evaluation
-        profile_text = f"Name: {profile['name']}. Expertise: {profile['expertise']}. Description: {profile['description']}"
-        # Create a prompt to ask the AI agent whether the profile matches the query
-        prompt = (
-            f"You are an AI agent. A user has asked the following query: '{query}'.\n"
-            f"The system has found the following profile:\n{profile_text}\n"
-            f"Does this profile closely match the user's query? Answer 'yes' or 'no'."
-        )
-
-        # Tokenize input for the model
-        print(f"Evaluating profile: {profile['name']}")
-        input_ids = tokenizer.encode(prompt, return_tensors='pt')
-
-        # Generate response from the model
-        output = model.generate(
-            input_ids,
-            max_length=1000,
-            num_return_sequences=1,
-            no_repeat_ngram_size=2,
-            early_stopping=True,
-        )
-
-        # Decode the response to check if the profile is a good match
-        response = tokenizer.decode(output[0], skip_special_tokens=True).strip().lower()
-        print(f"AI agent response for profile '{profile['name']}': {response}")
-        if 'yes' in response:
-            filtered_profiles.append(profile)
-
-    print(f"Filtered profiles count: {len(filtered_profiles)}")
-    return filtered_profiles
 
 # Function to generate a response
 def generate_response(query, relevant_profiles):
     # Build a prompt that includes the profiles to generate a response for the user
     profiles_text = '\n'.join([
-        f"Name: {p['name']}\nExpertise: {p['expertise']}\nDescription: {p['description']}\n"
+        f"Name: {p['name']}\nUnit: {['research_unit']}\Bio: {p['bio']}\Keywords: {p['keywords']}\n"
         for p in relevant_profiles
     ])
     prompt = (
-        f"You are assisting a healthcare researcher. They have asked: '{query}'. "
-        f"Based on their query, here are some AI researchers that might help:\n\n"
+        f"You are assisting a healthcare researcher. He or she created the following prompt: '{query}'. "
+        f"Using this prompt a database was queried to find profiles of researchers that best match this prompt."
+        f"These are the researchers that the database returned:\n\n"
         f"{profiles_text}\n"
-        f"Please provide further assistance or answer any questions they might have."
+        f"For each profile you need to decide if the profile indeed matches the query. If not then discard it."
+        f"You need to return a short response that summarizes the similar profiles and points the matches between the query and the profile"
+        f"Next you offer further assistance about the profiles"
+        f"Suggest two questions the healthcare researcher could ask about the profiles"
     )
-
+    print(prompt)
+    print(len(prompt))
+    fddd
     # Tokenize input for the text generation model
     print("Generating response for the user...")
+    response = pipe(str(prompt))
+    print(response)
+    return
     input_ids = tokenizer.encode(prompt, return_tensors='pt')
 
     # Generate response (adjust parameters as needed)
@@ -167,6 +150,9 @@ def generate_response(query, relevant_profiles):
         num_return_sequences=1,  # Generate only one response
         no_repeat_ngram_size=2,  # Avoid repeating phrases
         early_stopping=True,  # Stop early if the response is complete
+        do_sample=True,     # Enable sampling
+        temperature=0.7,    # Adjust for randomness
+        top_p=0.9,          # Nucleus sampling
     )
 
     # Decode the generated response to return to the user

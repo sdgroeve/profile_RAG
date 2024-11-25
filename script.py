@@ -65,7 +65,7 @@ def find_relevant_profiles(query, top_k=1):
 def generate_response(query, relevant_profiles):
     # Build a prompt that includes the profiles
     profiles_text = '\n'.join([
-        f"Name: {p['name']}\nExpertise: {p['expertise']}\nDescription: {p['description']}\n"
+        f"Name: {p['name']}\nUnit: {['research_unit']}\Bio: {p['bio']}\Keywords: {p['keywords']}\n"
         for p in relevant_profiles
     ])
     prompt = (
